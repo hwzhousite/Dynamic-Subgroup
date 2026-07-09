@@ -302,7 +302,8 @@ MDSP_para = function(Y, X,  m, n, time = NULL, Z = NULL, h_t = NULL, l1 = NULL,
 
     sp.0 <- gamma_para(b.h.new, m =m , h_t = h_t,
                        m.iter =50, eps = 0.001, K =K)
-    hist(b.h.new[,1,],breaks = 50)
+    
+    #hist(b.h.new[,1,],breaks = 50)
 
     cl.h = sp.0$cl_mat
     g.h = sp.0$gamma - 0.05
