@@ -437,3 +437,96 @@ MDSP_nonpara = function(Y, X, Z = NULL, time=NULL, m, n, h_t = NULL, l1 = NULL, 
 
 
 }
+
+
+#' Random-split initialization for MDSP
+#'
+#' Runs `max_iter` random binary splits of the samples, keeps the split whose
+#' two per-time OLS coefficient matrices are farthest apart, then derives the
+#' residual-based clustering and the treatment-coefficient initialization array.
+#'
+#' @param Y          n x m response matrix
+#' @param Z          n x m x q_ctrl control-covariate array
+#' @param X          n x m x p_treat treatment-covariate array
+#' @param ZX         n x m x (q_ctrl + p_treat) combined design array
+#' @param K          number of clusters (assumed 2 below, as in the original code)
+#' @param n,m        number of samples / time points
+#' @param p_treat    number of treatment covariates
+#' @param q_ctrl     number of control covariates
+#' @param true_groups,gamma_true  ground truth used only for evaluation
+#' @param max_iter   number of random splits to try
+#'
+#' @return list with gamma_mat, cl_mat1, accuracy_split,
+#'         gamma_hat_split_gamma, gamma_rmse_split_gamma, and int
+init_random_split <- function(Y, Z, X, ZX,
+                              K, n, m, p_treat, q_ctrl,
+                              true_groups, gamma_true,
+                              max_iter = 100) {
+  
+  dist      <- 0
+  gamma_mat <- NULL
+  
+  for (iter in 1:max_iter) {
+    temp_cl    <- rbinom(n = n, size = 1, prob = 0.5) + 1
+    temp_gamma <- array(0, dim = c(K, m, p_treat + q_ctrl))
+    for (tt in 1:m) {
+      X_t <- cbind(Z[, tt, ], X[, tt, ])
+      for (kk in 1:K) {
+        temp_x   <- X_t[temp_cl == kk, , drop = FALSE]
+        temp_y   <- Y[temp_cl == kk, tt, drop = FALSE]
+        temp_vec <- solve(t(temp_x) %*% temp_x) %*% (t(temp_x) %*% temp_y)
+        temp_gamma[kk, tt, ] <- temp_vec
+      }
+    }
+    temp_dist <- sum((temp_gamma[1, , ] - temp_gamma[2, , ])^2)
+    if (temp_dist > dist) {
+      dist      <- temp_dist
+      gamma_mat <- temp_gamma  # K x m x (q_ctrl + p_treat)
+    }
+  }
+  
+  ## residuals under each cluster's coefficients
+  res_mat <- array(NA_real_, dim = c(n, m, K))
+  for (i in 1:n) {
+    for (tt in 1:m) {
+      coef_vec1 <- c(gamma_mat[1, tt, ])
+      coef_vec2 <- c(gamma_mat[2, tt, ])
+      res_mat[i, tt, 1] <- abs(Y[i, tt] - sum(ZX[i, tt, ] * coef_vec1))
+      res_mat[i, tt, 2] <- abs(Y[i, tt] - sum(ZX[i, tt, ] * coef_vec2))
+    }
+  }
+  
+  ## per-sample cluster assignment (constant across time)
+  cl_mat1 <- matrix(NA_integer_, nrow = n, ncol = m)
+  for (i in 1:n) {
+    cl_mat1[i, ] <- which.min(c(
+      sum(abs(res_mat[i, , 1])),
+      sum(abs(res_mat[i, , 2]))
+    ))
+  }
+  
+  accuracy_split <- evaluate_group_accuracy(
+    cl_mat1, true_groups
+  )$overall_accuracy
+  
+  ## gamma for "Random Split Gamma"
+  gamma_hat_split_gamma  <- gamma_mat[, , (q_ctrl + 1):(q_ctrl + p_treat), drop = FALSE]
+  gamma_rmse_split_gamma <- gamma_rmse(gamma_hat_split_gamma, gamma_true)
+  
+  ## MDSP initialization array from the random-split clustering
+  int <- array(NA_real_, dim = c(n, m, p_treat))
+  for (tt in 1:m) {
+    for (j in 1:p_treat) {
+      int[, tt, j] <- gamma_mat[cl_mat1[, tt], tt, q_ctrl + j]
+    }
+  }
+  
+  list(
+    gamma_mat              = gamma_mat,
+    cl_mat1                = cl_mat1,
+    accuracy_split         = accuracy_split,
+    gamma_hat_split_gamma  = gamma_hat_split_gamma,
+    gamma_rmse_split_gamma = gamma_rmse_split_gamma,
+    int                    = int
+  )
+}
