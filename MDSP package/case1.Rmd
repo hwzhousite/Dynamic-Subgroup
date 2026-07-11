@@ -1,0 +1,249 @@
+---
+title: "case1"
+output: html_document
+date: "2026-07-11"
+---
+
+```{r}
+source("3_MDSP(nonpara).R")
+simulate_model_data_given_gamma <- function(
+    gamma_kt,                         # K x m x p array (given subgroup centers)
+    n_individuals = 100,
+    q_controls = 2,
+    ysd = 1,
+    switch_prob = 0.0                 # optional dynamic switching
+) {
+
+  ## -------------------------------
+  ## Dimensions inferred from gamma
+  ## -------------------------------
+  K <- dim(gamma_kt)[1]
+  m <- dim(gamma_kt)[2]
+  p <- dim(gamma_kt)[3]
+  n <- n_individuals
+  q <- q_controls
+
+  time_points <- seq(0.1, 0.9, length.out = m)
+
+  ## -------------------------------
+  ## Covariates
+  ## -------------------------------
+  Z <- array(rnorm(n * m * q), dim = c(n, m, q))
+  X <- array(rnorm(n * m * p), dim = c(n, m, p))
+
+  ## homogeneous control effects
+  alpha <- matrix(0, nrow = m, ncol = q)
+
+  ## -------------------------------
+  ## Containers
+  ## -------------------------------
+  y <- matrix(0, nrow = n, ncol = m)
+  beta_it <- array(0, dim = c(n, m, p))
+  true_groups <- matrix(0, nrow = n, ncol = m)
+
+  ## -------------------------------
+  ## Individual-level simulation
+  ## -------------------------------
+  for (i in seq_len(n)) {
+
+    # initial group (balanced by default)
+    if(i <= n/2){
+      current_group <- 1
+    }else{
+      current_group <- 2
+    }
+
+    for (t in seq_len(m)) {
+
+      # optional dynamic switching
+      if (t > 1 && runif(1) < switch_prob) {
+        current_group <- sample(1:K, 1)
+      }
+
+      true_groups[i, t] <- current_group
+
+      # individual coefficient = subgroup center
+      beta_it[i, t, ] <- gamma_kt[current_group, t, ]
+
+      # response
+      z_contrib <- sum(Z[i, t, ] * alpha[t, ])
+      x_contrib <- sum(X[i, t, ] * beta_it[i, t, ])
+      epsilon <- rnorm(1, 0, ysd)
+
+      y[i, t] <- z_contrib + x_contrib + epsilon
+    }
+  }
+
+  ## -------------------------------
+  ## Return (same format as before)
+  ## -------------------------------
+  return(list(
+    y = y,
+    Z = Z,
+    X = X,
+    true_groups = true_groups,
+    beta_it = beta_it,
+    alpha = alpha,
+    gamma_kt = gamma_kt,
+    time_points = time_points,
+    n = n,
+    m = m,
+    K = K,
+    q = q,
+    p = p
+  ))
+}
+
+library(abind)
+K=2
+tra_real = readRDS("tra_lagret.rds")
+tra_real = tra_real[complete.cases(tra_real),]
+temp_g = matrix(t(tra_real[,c(2,3)] * 10^3), nrow = 2)
+
+temp_g[1,1:109] = temp_g[1,1:109] + 1
+temp_g[2,1:109] = temp_g[2,1:109] - 1
+temp_g[1,236:276] = temp_g[1,236:276] + 1
+temp_g[2,236:276] = temp_g[2,236:276] - 1
+temp_g[c(1,2),110:235] = (temp_g[1, 110:235] + temp_g[1, 110:235]) /2
+
+
+
+temp_g = temp_g[ , 30:200 ]
+merge_status = FALSE
+for (i in 1:ncol(temp_g)) {
+
+  if((temp_g[1,i] - temp_g[2,i])^2 < 0.01 & !merge_status){
+
+    merge_status = TRUE
+    merge_point = i
+
+  }
+
+  if(merge_status){
+
+    temp_g[,i] = mean(temp_g[,i])
+
+  }
+
+
+}
+
+library(mgcv)
+
+
+for(i in 1:2){
+
+  x = 1:merge_point
+  y = temp_g[i,x]
+  fit <- gam(y ~ s(x, k = 10), method = "REML")
+  y_smooth <- predict(fit)
+  temp_g[i,x] = y_smooth
+
+}
+
+# merge point 82
+x = merge_point:ncol(temp_g)
+y = temp_g[1,x]
+fit <- gam(y ~ s(x, k = 10), method = "REML")
+y_smooth <- predict(fit)
+temp_g[,x] = rbind(y_smooth, y_smooth)
+
+
+
+
+plot(1:dim(temp_g)[2], temp_g[1, ], type = "l", ylim = c(-1,8))
+lines(1:dim(temp_g)[2], temp_g[2, ])
+
+array_g = array(temp_g, dim=c(nrow(temp_g), ncol(temp_g), 3))
+```
+
+
+```{r}
+data <- simulate_model_data_given_gamma(array_g, q_controls =  0, ysd = 0.5)
+
+Y <- data$y
+Z <- data$Z
+X <- data$X
+n <- data$n
+m <- data$m
+q <- data$q
+p <- data$p
+d <- data$d
+h_t = data$h_t
+time = data$time_points
+ZX     <- abind(Z, X, along = 3)
+
+max_iter <- 5000
+dist     <- 0
+
+for (iter in 1:max_iter) {
+  temp_cl    <- rbinom(n = n, size = 1, prob = 0.5) + 1
+  temp_gamma <- array(0, dim = c(K, m, p + q))
+
+  for (tt in 1:m) {
+    X_t <- cbind(Z[, tt, ], X[, tt, ])
+
+    for (kk in 1:K) {
+      temp_x   <- X_t[temp_cl == kk, , drop = FALSE]
+      temp_y   <- Y[temp_cl == kk, tt, drop = FALSE]
+      temp_vec <- solve(t(temp_x) %*% temp_x) %*% (t(temp_x) %*% temp_y)
+      temp_gamma[kk, tt, ] <- temp_vec
+    }
+  }
+
+  temp_dist <- sum((temp_gamma[1, , ] - temp_gamma[2, , ])^2)
+
+  if (temp_dist > dist) {
+    dist      <- temp_dist
+    gamma_mat <- temp_gamma  # K x m x (q_ctrl + p_treat)
+  }
+}
+
+res_mat <- array(NA_real_, dim = c(n, m, K))
+
+for (i in 1:n) {
+  for (tt in 1:m) {
+    coef_vec1 <- c(gamma_mat[1, tt, ])
+    coef_vec2 <- c(gamma_mat[2, tt, ])
+
+    res_mat[i, tt, 1] <- abs(Y[i, tt] - sum(ZX[i, tt, ] * coef_vec1))
+    res_mat[i, tt, 2] <- abs(Y[i, tt] - sum(ZX[i, tt, ] * coef_vec2))
+  }
+}
+
+cl_mat1 <- matrix(NA_integer_, nrow = n, ncol = m)
+for (i in 1:n) {
+  cl_mat1[i, ] <- which.min(c(
+    sum(abs(res_mat[i, , 1])),
+    sum(abs(res_mat[i, , 2]))
+  ))
+}
+
+
+
+int <- array(NA_real_, dim = c(n, m, p))
+for (tt in 1:m) {
+  for (j in 1:p) {
+    int[, tt, j] <- gamma_mat[cl_mat1[, tt], tt, q + j]
+  }
+}
+
+```
+
+
+```{r}
+
+result_mdsp_nonpara = MDSP_nonpara(Y = Y, X = X, Z = Z, time =time, kp_vec = rep(0.1,m),
+                                   m = m, n =n,  l1 = 0.5, beta.int = int)
+
+
+par(mfrow=c(2,1))
+plot(time, data$gamma_kt[1,,1], type = "l", ylim= c(-1.5,9), main = "Real Trajectory")
+lines(time, data$gamma_kt[2,,1], type = "l")
+
+plot(time, result_mdsp_nonpara$gamma[1,,1], type = "l", ylim= c(-1.5,9), main = "Fitted Trajectory")
+lines(time, result_mdsp_nonpara$gamma[2,,1], type = "l")
+
+
+
+```

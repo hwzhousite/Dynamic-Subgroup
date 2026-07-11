@@ -145,9 +145,9 @@ gamma_separated <- function(t, ...) {
 
   # Per-group deviations: permanently active (no merge taper)
   # dev1 > 0 and dev2 < 0 always → groups never cross or merge
-  dev1 <- +2.00 + 0.65*sin(2*pi*t + 0.2) + 0.32*sin(5*pi*t  + 0.8) +
+  dev1 <- +2.00 + 0.05*sin(2*pi*t + 0.2) + 0.32*sin(5*pi*t  + 0.8) +
            0.16*sin(9*pi*t  + 1.3)
-  dev2 <- -2.20 + 0.70*sin(2*pi*t + 1.5) + 0.35*sin(4*pi*t  + 0.3) +
+  dev2 <- -2.20 + 0.70*sin(2*pi*t + 1.5) + 0.5*sin(4*pi*t  + 0.3) +
            0.18*sin(7*pi*t  + 0.6)
 
   backbone <- rbind(

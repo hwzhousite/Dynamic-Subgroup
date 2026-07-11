@@ -1995,14 +1995,3 @@ fit_rolling_window <- function(Y, X, Z = NULL, K = 2L,
        time_sec      = proc.time()["elapsed"] - t0_clock)
 }
 
-# All permutations of 1..K_ as a list of integer vectors (K_! total).
-.all_perms <- function(K_) {
-  if (K_ == 1L) return(list(1L))
-  out <- list()
-  for (i in seq_len(K_)) {
-    sub  <- .all_perms(K_ - 1L)
-    rest <- setdiff(seq_len(K_), i)
-    for (s in sub) out[[length(out) + 1L]] <- c(i, rest[s])
-  }
-  out
-}
