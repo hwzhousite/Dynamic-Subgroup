@@ -29,7 +29,7 @@ For unit `i = 1..n` at time `t = 1..m`, with covariates `X[i,t,·] ∈ R^p` and 
 homogeneous controls `Z[i,t,·] ∈ R^q`:
 
 ```
-y_it = Z[i,t,·]ᵀ α(t) + X[i,t,·]ᵀ β_it,     β_it = γ_{k(i,t)}(t) + ε_it
+y_it = Z[i,t,·]ᵀ α(t) + X[i,t,·]ᵀ β_it + ε_it,     β_it = γ_{k(i,t)}(t) 
 ```
 
 - `k(i,t) ∈ {1,…,K}` is the unobserved, time-varying subgroup label.
